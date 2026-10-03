@@ -2,6 +2,8 @@
 
 ![WAR Runner](images/intro.jpg "WAR Runner")
 
+[![Get it on Google Play](https://img.shields.io/badge/Google_Play-Download-27875F?logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=app.flutterdev.jettyrunner)
+
 This public repository, [pezi/war_runner](https://github.com/pezi/war_runner),
 contains the demo application sources, Android WAR packaging tools, conversion
 guide, and downloadable WAR catalog for **WAR Runner**.
