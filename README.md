@@ -145,6 +145,23 @@ restarted. Address book contacts are stored in an H2 database file in the web
 app's persistent data directory; they survive restarts and updates, and the web
 admin can export, import or reset them.
 
+## Persistent application data
+
+The host wipes the extracted web root and Jetty's temporary directory on every
+start, so a WAR must not keep state there or in memory if it should outlive a
+restart. Instead, every installed WAR gets one stable directory,
+`no_backup/appdata/<id>`, that survives stop, start, restart, update and
+rollback. The host publishes it as `warrunner.dataDirectory` in three forms: a
+`ServletContext` attribute of type `java.io.File`, a context init parameter and
+a system property, each resolving to the same absolute path. Write only below
+that directory with relative paths and release file locks in `destroy()`.
+
+In the web admin, **Export data** downloads a stopped web app's directory as a
+ZIP, **Import data** replaces it with such a ZIP, and **Reset data** empties it.
+Deleting a WAR deletes its data as well. The address book demo is the reference
+adopter; the [conversion guide](docs/WAR_CONVERSION.md#8-store-persistent-data-in-the-host-provided-data-directory)
+has the lookup code, the JVM fallback and the rules in detail.
+
 ## Deploy from the command line
 
 Use the public Python CLI to upload a locally built Android WAR, start it,
