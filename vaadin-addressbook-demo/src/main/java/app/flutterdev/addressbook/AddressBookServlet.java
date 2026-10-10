@@ -1,8 +1,10 @@
 package app.flutterdev.addressbook;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.Set;
 import jakarta.servlet.ServletConfig;
+import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletException;
 import com.vaadin.flow.di.DefaultInstantiator;
 import com.vaadin.flow.di.Instantiator;
@@ -26,7 +28,26 @@ import com.vaadin.flow.server.startup.VaadinInitializerException;
  * which is what Spring would do through constructor injection.
  */
 public final class AddressBookServlet extends VaadinServlet {
+    /** WAR Runner's storage contract: the web app's persistent data directory. */
+    static final String DATA_DIRECTORY = "warrunner.dataDirectory";
+
     private PersonRepository repository;
+
+    /**
+     * The host publishes the directory as a {@link File} attribute, a context init parameter and
+     * a system property. Returns {@code null} on a container without the contract.
+     */
+    static File dataDirectory(ServletContext context) {
+        Object attribute = context.getAttribute(DATA_DIRECTORY);
+        if (attribute instanceof File file) {
+            return file;
+        }
+        String path = context.getInitParameter(DATA_DIRECTORY);
+        if (path == null) {
+            path = System.getProperty(DATA_DIRECTORY);
+        }
+        return path == null ? null : new File(path);
+    }
 
     @Override
     public void init(ServletConfig config) throws ServletException {
@@ -43,8 +64,9 @@ public final class AddressBookServlet extends VaadinServlet {
                     Set.of(RouteNotFoundError.class, InternalServerError.class), context);
             VaadinAppShellInitializer.init(Set.of(AppShell.class), context);
         }
-        repository = new PersonRepository();
-        System.out.println("Address book database ready with " + repository.count() + " contacts");
+        repository = new PersonRepository(dataDirectory(config.getServletContext()));
+        System.out.println("Address book database " + repository.location() + " ready with "
+                + repository.count() + " contacts");
         super.init(config);
     }
 

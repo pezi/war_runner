@@ -24,7 +24,7 @@ from the landing page are three useful checks, but none proves the app works.
 | Minimal Vaadin example | [Button demo POM](../vaadin-demo/pom.xml), [DemoServlet](../vaadin-demo/src/main/java/app/flutterdev/vaadindemo/DemoServlet.java) |
 | Complex upstream application | [Official demo POM](../vaadin-official-demo/pom.xml), [OfficialDemoServlet](../vaadin-official-demo/src/main/java/com/vaadin/demo/OfficialDemoServlet.java), [port notes](../vaadin-official-demo/README.md) |
 | Bookstore with authentication and forms | [Bookstore POM](../vaadin-bookstore-demo/pom.xml), [port notes](../vaadin-bookstore-demo/README.md) |
-| Database access without Spring (H2 over JDBC) | [Address book POM](../vaadin-addressbook-demo/pom.xml), [PersonRepository](../vaadin-addressbook-demo/src/main/java/app/flutterdev/addressbook/PersonRepository.java), [notes](../vaadin-addressbook-demo/README.md) |
+| Database access without Spring (H2 over JDBC), persistent data directory | [Address book POM](../vaadin-addressbook-demo/pom.xml), [PersonRepository](../vaadin-addressbook-demo/src/main/java/app/flutterdev/addressbook/PersonRepository.java), [AddressBookServlet](../vaadin-addressbook-demo/src/main/java/app/flutterdev/addressbook/AddressBookServlet.java), [notes](../vaadin-addressbook-demo/README.md) |
 
 For maintainers with the private app checkout, the corresponding host sources
 are listed below. Paths are relative to that app's root, locally `warrunner/`,
@@ -35,6 +35,7 @@ not this public repository:
 | Host dependencies, Android API floor, release settings | `android/app/build.gradle.kts` |
 | Foreground lifecycle and Flutter bridge | `JettyService.kt`, `MainActivity.kt` |
 | Deployment, extraction, DEX loading, start/stop | `JettyHost.kt`, `AndroidJettyRunner.java` |
+| Per-WAR data directory, export/import/reset | `ApplicationData.kt`, `AndroidJettyRunner.java` |
 | Resource URLs exposed by the DEX loader | `WarClassLoader.kt` |
 | Supported `web.xml` subset | `AndroidWebXml.java` |
 
@@ -45,7 +46,7 @@ Java classes are under `android/app/src/main/java/app/flutterdev/jettyrunner/`.
 
 | Layer | Current choice | Why it matters |
 | --- | --- | --- |
-| Android host | Jetty **12.1.13**, `org.eclipse.jetty.ee11:jetty-ee11-servlet` | EE11 supplies Servlet **6.1** for Vaadin 25. The Jetty version alone does not select the servlet environment. |
+| Android host | Jetty **12.1.14**, `org.eclipse.jetty.ee11:jetty-ee11-servlet` | EE11 supplies Servlet **6.1** for Vaadin 25. The Jetty version alone does not select the servlet environment. |
 | Host source / bytecode target | Java **17** | Separate from the JDK and bytecode level of the WAR build. |
 | Vaadin WARs | All four **25.2.8** (Flow **25.2.9**), Java release **21**, provided Servlet API **6.1.0** | The button and official demos moved from the upstream 25.1.5 to 25.2.8: Flow 25.1 asks the servlet context for app shell stylesheets without a leading slash, which Jetty 12 rejects with a logged `MalformedURLException` before Flow retries. Use JDK 21+ to rebuild. |
 | Hello World WAR | Java release **11**, provided Servlet API **5.0.0** | This particular older servlet works in the EE11 host. This is not a guarantee for every Servlet 5 application. |
@@ -291,6 +292,71 @@ denial does not block the service. Keep `Server.start`,
 or a blocking server `join` on the UI thread. Failed startup must release the
 port and partially created context. The bridge handles `Throwable` because
 missing Java APIs can raise linkage errors rather than ordinary exceptions.
+
+### 8. Store persistent data in the host-provided data directory
+
+The host clears the extracted web root, the extracted classpath and Jetty's
+temporary directory (`jakarta.servlet.context.tempdir`) on **every** start, and
+Android may clear the code cache they live in at any time. Anything an
+application writes there, and anything it keeps in static fields or an
+in-memory database, is lost on stop, restart, update and rollback.
+
+For data that must survive, the host gives every WAR one stable directory,
+`no_backup/appdata/<id>`, created before each start. It is published through
+three equivalent channels, all named `warrunner.dataDirectory`:
+
+| Channel | Type | Lookup |
+| --- | --- | --- |
+| `ServletContext` attribute | `java.io.File` | `context.getAttribute("warrunner.dataDirectory")` |
+| Context init parameter | `String` absolute path | `context.getInitParameter("warrunner.dataDirectory")` |
+| System property | `String` absolute path | `System.getProperty("warrunner.dataDirectory")`, while the WAR runs |
+
+Resolve it once at startup, in this order, and fall back to the temporary
+directory so the same WAR still runs on a JVM container:
+
+```java
+static File dataDirectory(ServletContext context) {
+    Object attribute = context.getAttribute("warrunner.dataDirectory");
+    if (attribute instanceof File file) return file;
+    String path = context.getInitParameter("warrunner.dataDirectory");
+    if (path == null) path = System.getProperty("warrunner.dataDirectory");
+    if (path != null) return new File(path);
+    return (File) context.getAttribute(ServletContext.TEMPDIR); // JVM fallback: not persistent
+}
+```
+
+For a JVM deployment, set the same `context-param` in `web.xml` or pass
+`-Dwarrunner.dataDirectory=/var/lib/myapp`. The host applies its init parameter
+**after** the descriptor, so a path written for the JVM never reaches the
+device; the Console notes the override.
+
+Rules for the directory:
+
+- Write only below it, with relative paths. Never persist absolute paths: the
+  directory moves with the application ID, not with the package.
+- It persists across stop, start, restart, update and rollback. Rollback does
+  not restore data, so keep schema changes backward compatible or migrate on
+  startup. The web admin's **Reset data** and **Delete** remove it; **Export
+  data** downloads it as a ZIP with relative paths and **Import data** replaces
+  it with such a ZIP, both only while the application is stopped.
+- Release file and database locks in `destroy()`, so a later start, an import,
+  or a reset can proceed.
+
+The address book demo is the reference adopter. `AddressBookServlet.dataDirectory`
+resolves the contract as above but falls back to `null`, and `PersonRepository`
+then chooses the database:
+
+```java
+String url = dataDirectory == null
+        ? "jdbc:h2:mem:addressbook;DB_CLOSE_DELAY=-1"
+        : "jdbc:h2:file:" + new File(dataDirectory, "addressbook").getAbsolutePath() + ";DB_CLOSE_ON_EXIT=FALSE";
+```
+
+`DB_CLOSE_ON_EXIT=FALSE` avoids H2's shutdown hook; `destroy()` issues `SHUTDOWN`
+instead, which releases the file lock. The schema is created with
+`IF NOT EXISTS` and seeded only when the table is empty, so an existing database
+is kept and a reset directory is seeded again. The bookstore demo still keeps
+its state in memory; adopting the directory there is a follow-up.
 
 ## Failure findings and the smallest working fixes
 

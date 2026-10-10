@@ -27,6 +27,6 @@
     "id": "vaadin-addressbook",
     "name": "Vaadin Address Book Demo",
     "fileName": "vaadin-addressbook-demo.war",
-    "description": "Search, add, edit and delete contacts kept in an in-memory H2 database on the phone. Starts with five people."
+    "description": "Search, add, edit and delete contacts in an H2 database stored in the web app's data directory on the phone. Starts with five people; changes survive restarts."
   }
 ]
