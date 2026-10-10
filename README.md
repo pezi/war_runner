@@ -2,6 +2,8 @@
 
 ![WAR Runner](images/intro.jpg "WAR Runner")
 
+[![Get it on Google Play](https://img.shields.io/badge/Google_Play-Download-27875F?logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=app.flutterdev.jettyrunner)
+
 This public repository, [pezi/war_runner](https://github.com/pezi/war_runner),
 contains the demo application sources, Android WAR packaging tools, conversion
 guide, and downloadable WAR catalog for **WAR Runner**.
@@ -10,7 +12,7 @@ guide, and downloadable WAR catalog for **WAR Runner**.
 and app tests are not included here.** You can build the demo WARs from this
 repository without the app source or Flutter. Running them on Android requires
 the WAR Runner app on Android **15+ (API 35+)**. The app embeds Jetty
-**12.1.13 EE11 / Servlet 6.1** and downloads WARs at runtime; its APK contains
+**12.1.14 EE11 / Servlet 6.1** and downloads WARs at runtime; its APK contains
 no WAR files.
 
 ```text
@@ -18,7 +20,7 @@ no WAR files.
 ├── vaadin-demo/            # Vaadin button demo
 ├── vaadin-official-demo/    # Official Vaadin demo port
 ├── vaadin-bookstore-demo/   # Vaadin Bookstore port
-├── vaadin-addressbook-demo/ # Address book on an in-memory H2 database
+├── vaadin-addressbook-demo/ # Address book on an H2 database in the host's data directory
 ├── scripts/                # Build, DEX packaging and catalog generation
 ├── docs/WAR_CONVERSION.md  # Conversion contract and validation history
 └── war_repository/         # demos.json, generated wars.json and Android WARs
@@ -138,8 +140,10 @@ such as `my-vaadin-demo.war`: catalog filenames and existing upload filenames
 are reserved. Start the uploaded application from the web admin or the app.
 
 Bookstore sample logins are **admin / admin** for editing and **user / user**
-for browsing. Bookstore changes and address book contacts are kept in memory
-and reset when their WAR is restarted.
+for browsing. Bookstore changes are kept in memory and reset when its WAR is
+restarted. Address book contacts are stored in an H2 database file in the web
+app's persistent data directory; they survive restarts and updates, and the web
+admin can export, import or reset them.
 
 ## Deploy from the command line
 

@@ -1,5 +1,6 @@
 package app.flutterdev.addressbook;
 
+import java.io.File;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -11,30 +12,51 @@ import java.util.Optional;
 import java.util.Properties;
 
 /**
- * Contacts in an in-memory H2 database, accessed over plain JDBC.
+ * Contacts in an H2 database, accessed over plain JDBC.
  * <p>
  * The Vaadin documentation persists the same model through Spring Data JPA. Spring and
  * Hibernate generate classes at run time, which Android's DEX runtime cannot load, so this
  * demo keeps the repository shape (find, search, save, delete) and talks to H2 directly.
- * One connection is shared and every call is synchronized; the database lives as long as the
- * web app runs and starts again with the five demo people.
+ * One connection is shared and every call is synchronized.
+ * <p>
+ * On WAR Runner the database file lives in the web app's persistent data directory, so
+ * contacts survive stop, start, update and rollback. The host's "Reset data" action empties
+ * the directory and the next start seeds the five demo people again. Without a data directory,
+ * on a plain JVM container, the database is in memory and lives as long as the web app runs.
  */
 public final class PersonRepository implements AutoCloseable {
-    private static final String URL = "jdbc:h2:mem:addressbook;DB_CLOSE_DELAY=-1";
+    private static final String MEMORY_URL = "jdbc:h2:mem:addressbook;DB_CLOSE_DELAY=-1";
     private final Connection connection;
+    private final String location;
 
-    public PersonRepository() {
+    /** Opens the database in {@code dataDirectory}, or in memory when it is {@code null}. */
+    public PersonRepository(File dataDirectory) {
+        String url;
+        if (dataDirectory == null) {
+            url = MEMORY_URL;
+            location = "in memory";
+        } else {
+            // One MVStore file below the data directory; the host supplies an absolute path.
+            // No shutdown hook: the servlet closes the database in destroy().
+            url = "jdbc:h2:file:" + new File(dataDirectory, "addressbook").getAbsolutePath() + ";DB_CLOSE_ON_EXIT=FALSE";
+            location = dataDirectory.getAbsolutePath();
+        }
         try {
             // Driver.connect avoids DriverManager and the JNDI-backed H2 data sources,
             // neither of which is available on Android.
-            connection = org.h2.Driver.load().connect(URL, new Properties());
+            connection = org.h2.Driver.load().connect(url, new Properties());
             createSchema();
             if (count() == 0) {
                 seed();
             }
         } catch (SQLException failure) {
-            throw new IllegalStateException("Cannot open the in-memory address book database", failure);
+            throw new IllegalStateException("Cannot open the address book database " + location, failure);
         }
+    }
+
+    /** Where the database lives, for the startup log. */
+    public String location() {
+        return location;
     }
 
     private void createSchema() throws SQLException {
@@ -181,7 +203,8 @@ public final class PersonRepository implements AutoCloseable {
     @Override
     public synchronized void close() {
         try (Statement statement = connection.createStatement()) {
-            // Drop the in-memory database so a restarted web app seeds again.
+            // Closes the database and releases its file lock, so a later start, import or
+            // reset can use the data directory. An in-memory database is dropped.
             statement.execute("SHUTDOWN");
         } catch (SQLException ignored) {
             // The connection is closed either way.
